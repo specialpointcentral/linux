@@ -115,6 +115,7 @@ config LOONGARCH
 	select SWIOTLB
 	select TRACE_IRQFLAGS_SUPPORT
 	select USE_PERCPU_NUMA_NODE_ID
+	select USER_STACKTRACE_SUPPORT
 	select ZONE_DMA32
 	select MMU_GATHER_MERGE_VMAS if MMU
 
@@ -138,6 +139,10 @@ config L1_CACHE_SHIFT
 	default "6"
 
 config LOCKDEP_SUPPORT
+	bool
+	default y
+
+config STACKTRACE_SUPPORT
 	bool
 	default y
 
