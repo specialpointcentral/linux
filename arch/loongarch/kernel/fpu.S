@@ -165,6 +165,14 @@
 	.macro sc_save_fcsr base, tmp0
 	movfcsr2gr	\tmp0, fcsr0
 	EX	st.w \tmp0, \base, 0
+#if defined(CONFIG_CPU_HAS_LBT)
+	/* TM bit is always 0 if LBT not supported */
+	andi	\tmp0, \tmp0, FPU_CSR_TM
+	beqz	\tmp0, 1f
+	bstrins.d \tmp0, $r0, FPU_CSR_TM_SHIFT, FPU_CSR_TM_SHIFT
+	movgr2fcsr      fcsr0, \tmp0
+	1:
+#endif
 	.endm
 
 	.macro sc_restore_fcsr base, tmp0
@@ -312,6 +320,43 @@
 	EX_XV	0xb2 $xr31, \base, (31 * LASX_REG_WIDTH)
 	.endm
 
+#if defined(CONFIG_CPU_HAS_LBT)
+	.macro sc_save_ftop base, tmp0
+	x86mftop \tmp0
+	EX	st.b \tmp0, \base, 0
+	.endm
+
+	.macro sc_restore_ftop base, tmp0, tmp1
+	EX	ld.b \tmp0, \base, 0
+	la.pcrel \tmp1, 2f
+	alsl.d \tmp1, \tmp0, \tmp1, 3
+	jr \tmp1
+	2:
+	x86mttop 0
+	b 1f
+	x86mttop 1
+	b 1f
+	x86mttop 2
+	b 1f
+	x86mttop 3
+	b 1f
+	x86mttop 4
+	b 1f
+	x86mttop 5
+	b 1f
+	x86mttop 6
+	b 1f
+	x86mttop 7
+	1:
+	.endm
+#else
+	.macro sc_save_ftop base, tmp0
+	.endm
+
+	.macro sc_restore_ftop base, tmp0, tmp1
+	.endm
+#endif
+
 /*
  * Save a thread's fp context.
  */
@@ -328,7 +373,7 @@ EXPORT_SYMBOL(_save_fp)
  */
 SYM_FUNC_START(_restore_fp)
 	fpu_restore_double a0 t1		# clobbers t1
-	fpu_restore_csr	a0 t1
+	fpu_restore_csr	a0 t1 t2
 	fpu_restore_cc	a0 t1 t2		# clobbers t1, t2
 	jirl zero, ra, 0
 SYM_FUNC_END(_restore_fp)
@@ -459,9 +504,11 @@ SYM_FUNC_END(_init_fpu)
  * a0: fpregs
  * a1: fcc
  * a2: fcsr
+ * a3: ftop
  */
 SYM_FUNC_START(_save_fp_context)
 	sc_save_fcc a1 t1 t2
+	sc_save_ftop a3 t1
 	sc_save_fcsr a2 t1
 	sc_save_fp a0
 	li.w	a0, 0					# success
@@ -472,10 +519,12 @@ SYM_FUNC_END(_save_fp_context)
  * a0: fpregs
  * a1: fcc
  * a2: fcsr
+ * a3: ftop
  */
 SYM_FUNC_START(_restore_fp_context)
 	sc_restore_fp a0
 	sc_restore_fcc a1 t1 t2
+	sc_restore_ftop a3 t1 t2
 	sc_restore_fcsr a2 t1
 	li.w	a0, 0					# success
 	jirl zero, ra, 0
