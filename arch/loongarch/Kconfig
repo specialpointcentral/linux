@@ -131,6 +131,12 @@ config CPU_HAS_FPU
 	bool
 	default y
 
+config CPU_HAS_LBT
+	bool "Support for Loongson Binary Translation"
+	default y
+	help
+	  This option is used to enable LBT(Loongson Binary Translation)
+
 config CPU_HAS_PREFETCH
 	bool
 	default y

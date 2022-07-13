@@ -7,6 +7,7 @@
 
 #include <asm/cpu-features.h>
 #include <asm/fpu.h>
+#include <asm/lbt.h>
 
 struct task_struct;
 
@@ -31,6 +32,7 @@ extern asmlinkage struct task_struct *__switch_to(struct task_struct *prev,
 #define switch_to(prev, next, last)					\
 do {									\
 	lose_fpu_inatomic(1, prev);					\
+	lose_lbt_inatomic(1, prev);					\
 	(last) = __switch_to(prev, next, task_thread_info(next));	\
 } while (0)
 

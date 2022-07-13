@@ -35,6 +35,7 @@
 #include <asm/cpu.h>
 #include <asm/cpu-info.h>
 #include <asm/fpu.h>
+#include <asm/lbt.h>
 #include <asm/loongarch.h>
 #include <asm/page.h>
 #include <asm/pgtable.h>
@@ -150,6 +151,9 @@ static int fpr_get(struct task_struct *target,
 
 	r = membuf_write(&to, &target->thread.fpu.fcc, sizeof(target->thread.fpu.fcc));
 	r = membuf_write(&to, &target->thread.fpu.fcsr, sizeof(target->thread.fpu.fcsr));
+#ifdef CONFIG_CPU_HAS_LBT
+	r = membuf_write(&to, &target->thread.fpu.ftop, sizeof(target->thread.fpu.ftop));
+#endif
 
 	return r;
 }
@@ -193,7 +197,7 @@ static int fpr_set(struct task_struct *target,
 		   const void *kbuf, const void __user *ubuf)
 {
 	const int fcc_start = NUM_FPU_REGS * sizeof(elf_fpreg_t);
-	const int fcc_end = fcc_start + sizeof(u64);
+	const int fcsr_start = fcc_start + sizeof(u64);
 	int err;
 
 	BUG_ON(count % sizeof(elf_fpreg_t));
@@ -209,10 +213,18 @@ static int fpr_set(struct task_struct *target,
 	if (err)
 		return err;
 
-	if (count > 0)
-		err |= user_regset_copyin(&pos, &count, &kbuf, &ubuf,
-					  &target->thread.fpu.fcc,
-					  fcc_start, fcc_end);
+	err |= user_regset_copyin(&pos, &count, &kbuf, &ubuf,
+				  &target->thread.fpu.fcc, fcc_start,
+				  fcc_start + sizeof(u64));
+	err |= user_regset_copyin(&pos, &count, &kbuf, &ubuf,
+				  &target->thread.fpu.fcsr, fcsr_start,
+				  fcsr_start + sizeof(u32));
+#ifdef CONFIG_CPU_HAS_LBT
+	const int ftop_start = fcsr_start + sizeof(u32);
+	err |= user_regset_copyin(&pos, &count, &kbuf, &ubuf,
+				  &target->thread.fpu.ftop, ftop_start,
+				  ftop_start + sizeof(u8));
+#endif
 
 	return err;
 }
@@ -243,6 +255,43 @@ static int cfg_set(struct task_struct *target,
 {
 	return 0;
 }
+
+#ifdef CONFIG_CPU_HAS_LBT
+static int lbt_get(struct task_struct *target,
+		   const struct user_regset *regset,
+		   struct membuf to)
+{
+	int r;
+
+	r = membuf_write(&to, &target->thread.scr0, sizeof(target->thread.scr0));
+	r = membuf_write(&to, &target->thread.scr1, sizeof(target->thread.scr1));
+	r = membuf_write(&to, &target->thread.scr2, sizeof(target->thread.scr2));
+	r = membuf_write(&to, &target->thread.scr3, sizeof(target->thread.scr3));
+
+	r = membuf_write(&to, &target->thread.eflags, sizeof(target->thread.eflags));
+
+	return r;
+}
+
+static int lbt_set(struct task_struct *target,
+		   const struct user_regset *regset,
+		   unsigned int pos, unsigned int count,
+		   const void *kbuf, const void __user *ubuf)
+{
+	const int eflags_start = 4 * sizeof(target->thread.scr0);
+	const int eflags_end = eflags_start + sizeof(u32);
+	int err = 0;
+
+	err |= user_regset_copyin(&pos, &count, &kbuf, &ubuf,
+				  &target->thread.scr0,
+				  0, 4 * sizeof(target->thread.scr0));
+	err |= user_regset_copyin(&pos, &count, &kbuf, &ubuf,
+				  &target->thread.eflags,
+				  eflags_start, eflags_end);
+
+	return err;
+}
+#endif
 
 struct pt_regs_offset {
 	const char *name;
@@ -317,6 +366,9 @@ enum loongarch_regset {
 	REGSET_GPR,
 	REGSET_FPR,
 	REGSET_CPUCFG,
+#ifdef CONFIG_CPU_HAS_LBT
+	REGSET_LBT,
+#endif
 };
 
 static const struct user_regset loongarch64_regsets[] = {
@@ -344,6 +396,16 @@ static const struct user_regset loongarch64_regsets[] = {
 		.regset_get	= cfg_get,
 		.set		= cfg_set,
 	},
+#ifdef CONFIG_CPU_HAS_LBT
+	[REGSET_LBT] = {
+		.core_note_type	= NT_LOONGARCH_LBT,
+		.n		= 5,
+		.size		= sizeof(u64),
+		.align		= sizeof(u64),
+		.regset_get = lbt_get,
+		.set		= lbt_set,
+	},
+#endif
 };
 
 static const struct user_regset_view user_loongarch64_view = {

@@ -81,6 +81,7 @@ BUILD_FPR_ACCESS(64)
 struct loongarch_fpu {
 	unsigned int	fcsr;
 	uint64_t	fcc;	/* 8x8 */
+	uint64_t	ftop;
 	union fpureg	fpr[NUM_FPU_REGS];
 };
 

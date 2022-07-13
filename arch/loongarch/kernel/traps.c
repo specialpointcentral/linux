@@ -34,6 +34,7 @@
 #include <asm/break.h>
 #include <asm/cpu.h>
 #include <asm/fpu.h>
+#include <asm/lbt.h>
 #include <asm/loongarch.h>
 #include <asm/mmu_context.h>
 #include <asm/pgtable.h>
@@ -510,6 +511,25 @@ static void init_restore_fp(void)
 	BUG_ON(!is_fp_enabled());
 }
 
+#ifdef CONFIG_CPU_HAS_LBT
+static void init_restore_lbt(void)
+{
+	if (!thread_lbt_context_live()) {
+		/* First time lbt context user */
+		init_lbt();
+	} else {
+		/* Enable and restore */
+		if (!is_lbt_owner())
+			own_lbt_inatomic(1);
+	}
+
+	BUG_ON(!is_lbt_enabled());
+}
+#else
+static void init_restore_lbt(void)
+{}
+#endif
+
 asmlinkage void noinstr do_fpu(struct pt_regs *regs)
 {
 	irqentry_state_t state = irqentry_enter(regs);
@@ -552,7 +572,19 @@ asmlinkage void noinstr do_lbt(struct pt_regs *regs)
 	irqentry_state_t state = irqentry_enter(regs);
 
 	local_irq_enable();
-	force_sig(SIGILL);
+
+	if (cpu_has_lbt) {
+		preempt_disable();
+		init_restore_lbt();
+		preempt_enable();
+	} else {
+		/*
+		 * If cpu do not support lbt or do not define CPU_HAS_LBT.
+		 * The kernel need to raise SIGILL.
+		 */
+		force_sig(SIGILL);
+	}
+
 	local_irq_disable();
 
 	irqentry_exit(regs, state);

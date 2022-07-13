@@ -112,9 +112,52 @@
 	.ifc	\r, $r31
 	\var	= 31
 	.endif
+	.ifc	\r, $scr0
+	\var	= 0
+	.endif
+	.ifc	\r, $scr1
+	\var	= 1
+	.endif
+	.ifc	\r, $scr2
+	\var	= 2
+	.endif
+	.ifc	\r, $scr3
+	\var	= 3
+	.endif
 	.iflt	\var
 	.error	"Unable to parse register name \r"
 	.endif
+	.endm
+
+	.macro	x86mttop ptr
+	.word ((0x70 << 8) | (\ptr << 5))
+	.endm
+
+	.macro	x86mftop reg
+	parse_r __reg, \reg
+	.word ((0x3a0 << 5) | __reg)
+	.endm
+
+	.macro	x86mtflag reg mask
+	parse_r __reg, \reg
+	.word ((0x17 << 18) | (\mask << 10) | (1 << 5) | __reg)
+	.endm
+
+	.macro	x86mfflag reg mask
+	parse_r __reg, \reg
+	.word ((0x17 << 18) | (\mask << 10) | (0 << 5) | __reg)
+	.endm
+
+	.macro	gr2scr scr gpr
+	parse_r __scr, \scr
+	parse_r __gpr, \gpr
+	.word ((0x2 << 10) | (__reg << 5) | __scr)
+	.endm
+
+	.macro	scr2gr gpr scr
+	parse_r __gpr, \gpr
+	parse_r __scr, \scr
+	.word ((0x3 << 10) | (__scr << 5) | __reg)
 	.endm
 
 	.macro	cpu_save_nonscratch thread
@@ -149,11 +192,28 @@
 	.macro fpu_save_csr thread tmp
 	movfcsr2gr	\tmp, fcsr0
 	stptr.w	\tmp, \thread, THREAD_FCSR
+#ifdef CONFIG_CPU_HAS_LBT
+	/* TM bit is always 0 if LBT not supported */
+	andi	\tmp, \tmp, FPU_CSR_TM
+	beqz	\tmp, 1f
+	/* clean TM bit and save top */
+	bstrins.d	\tmp, zero, FPU_CSR_TM_SHIFT, FPU_CSR_TM_SHIFT
+	movgr2fcsr	fcsr0, \tmp
+	fpu_save_ftop	\thread, \tmp
+	1 :
+#endif
 	.endm
 
-	.macro fpu_restore_csr thread tmp
-	ldptr.w	\tmp, \thread, THREAD_FCSR
-	movgr2fcsr	fcsr0, \tmp
+	.macro fpu_restore_csr thread tmp0 tmp1
+	ldptr.w	\tmp0, \thread, THREAD_FCSR
+	movgr2fcsr	fcsr0, \tmp0
+#ifdef CONFIG_CPU_HAS_LBT
+	/* TM bit is always 0 if LBT not supported */
+	andi	\tmp0, \tmp0, FPU_CSR_TM
+	beqz	\tmp0, 1f
+	fpu_restore_ftop	\thread, \tmp0, \tmp1
+	1 :
+#endif
 	.endm
 
 	.macro fpu_save_cc thread tmp0 tmp1
@@ -268,6 +328,67 @@
 	fld.d	$f29, \tmp, THREAD_FPR29 - THREAD_FPR0
 	fld.d	$f30, \tmp, THREAD_FPR30 - THREAD_FPR0
 	fld.d	$f31, \tmp, THREAD_FPR31 - THREAD_FPR0
+	.endm
+
+	.macro	fpu_save_ftop thread tmp
+	x86mftop \tmp
+	stptr.d \tmp, \thread, THREAD_FTOP
+	.endm
+
+	.macro	fpu_restore_ftop thread tmp0 tmp1
+	ldptr.d	\tmp0, \thread, THREAD_FTOP
+	la.pcrel	\tmp1, 1f
+	alsl.d	\tmp1, \tmp0, \tmp1, 1
+	jirl $r0, \tmp1, 0
+	1 :
+	x86mttop 0
+	b 1f
+	x86mttop 1
+	b 1f
+	x86mttop 2
+	b 1f
+	x86mttop 3
+	b 1f
+	x86mttop 4
+	b 1f
+	x86mttop 5
+	b 1f
+	x86mttop 6
+	b 1f
+	x86mttop 7
+	1 :
+	.endm
+
+	.macro	lbt_save_scr thread tmp
+	scr2gr	\tmp, $scr0
+	stptr.d	\tmp, \thread, THREAD_SCR0
+	scr2gr	\tmp, $scr1
+	stptr.d	\tmp, \thread, THREAD_SCR1
+	scr2gr	\tmp, $scr2
+	stptr.d	\tmp, \thread, THREAD_SCR2
+	scr2gr	\tmp, $scr3
+	stptr.d	\tmp, \thread, THREAD_SCR3
+	.endm
+
+	.macro	lbt_restore_scr thread tmp
+	ldptr.d	\tmp, \thread, THREAD_SCR0
+	gr2scr	$scr0, \tmp
+	ldptr.d	\tmp, \thread, THREAD_SCR1
+	gr2scr	$scr1, \tmp
+	ldptr.d	\tmp, \thread, THREAD_SCR2
+	gr2scr	$scr2, \tmp
+	ldptr.d	\tmp, \thread, THREAD_SCR3
+	gr2scr	$scr3, \tmp
+	.endm
+
+	.macro	lbt_save_eflag thread tmp
+	x86mfflag	\tmp, 0x3f
+	stptr.d	\tmp, \thread, THREAD_EFLAGS
+	.endm
+
+	.macro	lbt_restore_eflag thread tmp
+	ldptr.d	\tmp, \thread, THREAD_EFLAGS
+	x86mtflag	\tmp, 0x3f
 	.endm
 
 .macro not dst src
